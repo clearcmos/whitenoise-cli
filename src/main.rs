@@ -33,11 +33,40 @@ struct Args {
     non_interactive: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+enum SoundStyle {
+    Vanilla,
+    Rain,
+}
+
+impl SoundStyle {
+    fn name(&self) -> &'static str {
+        match self {
+            SoundStyle::Vanilla => "Vanilla",
+            SoundStyle::Rain => "Rain",
+        }
+    }
+    
+    fn next(&self) -> Self {
+        match self {
+            SoundStyle::Vanilla => SoundStyle::Rain,
+            SoundStyle::Rain => SoundStyle::Vanilla,
+        }
+    }
+}
+
+impl Default for SoundStyle {
+    fn default() -> Self {
+        SoundStyle::Vanilla
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AudioSettings {
     volume: f32,
     frequency_bands: [f32; 8], // 8 frequency bands
     perceptual_normalization: bool, // Fletcher-Munson compensation
+    sound_style: SoundStyle,
 }
 
 impl Default for AudioSettings {
@@ -46,6 +75,7 @@ impl Default for AudioSettings {
             volume: 0.0, // Always start at 0% volume for safety
             frequency_bands: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5], // Balanced
             perceptual_normalization: false, // Start with technical mode
+            sound_style: SoundStyle::default(),
         }
     }
 }
@@ -162,9 +192,84 @@ impl BiquadFilter {
     }
 }
 
+
+struct RainGenerator {
+    rng: SmallRng,
+    // Multiple filtered noise sources for realistic rain layers
+    low_filter_state: f32,
+    mid_filter_state: f32,
+    high_filter_state: f32,
+    droplet_timer: f32,
+    droplet_intensity: f32,
+    intensity_mod: f32,
+    mod_timer: f32,
+}
+
+impl RainGenerator {
+    fn new() -> Self {
+        Self {
+            rng: SmallRng::from_entropy(),
+            low_filter_state: 0.0,
+            mid_filter_state: 0.0,
+            high_filter_state: 0.0,
+            droplet_timer: 0.0,
+            droplet_intensity: 0.0,
+            intensity_mod: 1.0,
+            mod_timer: 0.0,
+        }
+    }
+    
+    fn generate_sample(&mut self, sample_rate: f32) -> f32 {
+        // Layer 1: Low frequency rumble (heavy rain on surfaces)
+        let low_noise = (self.rng.r#gen::<f32>() - 0.5) * 0.4;
+        self.low_filter_state = 0.98 * self.low_filter_state + 0.02 * low_noise;
+        let low_layer = self.low_filter_state * 0.3;
+        
+        // Layer 2: Mid frequency body (main rain sound)
+        let mid_noise = (self.rng.r#gen::<f32>() - 0.5) * 0.6;
+        self.mid_filter_state = 0.85 * self.mid_filter_state + 0.15 * mid_noise;
+        let mid_layer = self.mid_filter_state * 0.8;
+        
+        // Layer 3: High frequency texture (droplets and splashes)
+        let high_noise = (self.rng.r#gen::<f32>() - 0.5) * 0.3;
+        self.high_filter_state = 0.6 * self.high_filter_state + 0.4 * high_noise;
+        let high_layer = self.high_filter_state * 0.4;
+        
+        // Layer 4: Individual droplet transients
+        if self.droplet_timer <= 0.0 {
+            self.droplet_intensity = 0.3 + self.rng.r#gen::<f32>() * 0.4;
+            self.droplet_timer = (20.0 + self.rng.r#gen::<f32>() * 60.0) * sample_rate / 44100.0;
+        } else {
+            self.droplet_timer -= 1.0;
+        }
+        self.droplet_intensity *= 0.996;
+        
+        let droplet_transient = if self.droplet_intensity > 0.02 {
+            (self.rng.r#gen::<f32>() - 0.5) * self.droplet_intensity * 0.3
+        } else {
+            0.0
+        };
+        
+        // Layer 5: Slow intensity modulation (natural variation)
+        if self.mod_timer <= 0.0 {
+            self.intensity_mod = 0.7 + self.rng.r#gen::<f32>() * 0.3;
+            self.mod_timer = (200.0 + self.rng.r#gen::<f32>() * 400.0) * sample_rate / 44100.0;
+        } else {
+            self.mod_timer -= 1.0;
+        }
+        
+        // Combine all layers with intensity modulation
+        let combined = (low_layer + mid_layer + high_layer + droplet_transient) * self.intensity_mod;
+        
+        // Final limiting to prevent clipping
+        combined.max(-0.6).min(0.6)
+    }
+}
+
 struct FrequencyBandGenerator {
     rng: SmallRng,
     filter: BiquadFilter,
+    rain_generator: RainGenerator,
 }
 
 impl FrequencyBandGenerator {
@@ -185,19 +290,34 @@ impl FrequencyBandGenerator {
         Self {
             rng: SmallRng::from_entropy(),
             filter,
+            rain_generator: RainGenerator::new(),
         }
     }
     
-    fn generate_sample(&mut self, gain: f32, center_freq: f32, perceptual_normalization: bool) -> f32 {
-        if gain <= 0.001 {
-            return 0.0;
-        }
-        
-        // Generate white noise
-        let noise = (self.rng.r#gen::<f32>() - 0.5) * 2.0;
+    fn generate_sample(&mut self, gain: f32, center_freq: f32, perceptual_normalization: bool, sound_style: SoundStyle, sample_rate: f32) -> f32 {        
+        // Generate base audio based on style
+        let base_audio = match sound_style {
+            SoundStyle::Vanilla => {
+                // Original clean white noise (frequency bands work normally)
+                if gain <= 0.001 {
+                    return 0.0;
+                }
+                (self.rng.r#gen::<f32>() - 0.5) * 2.0
+            }
+            SoundStyle::Rain => {
+                // Rain preset - NOT affected by frequency bands
+                // Generate once per band but only use center frequency band
+                if center_freq >= 500.0 && center_freq < 2000.0 {
+                    // Only the "Mid" band generates rain sound
+                    self.rain_generator.generate_sample(sample_rate)
+                } else {
+                    return 0.0; // Other bands are silent for rain
+                }
+            }
+        };
         
         // Apply filter and gain
-        let filtered = self.filter.process(noise);
+        let filtered = self.filter.process(base_audio);
         
         // Apply Fletcher-Munson compensation if enabled
         let perceptual_gain = if perceptual_normalization {
@@ -240,7 +360,7 @@ impl NoiseGenerator {
         Self { bands, center_frequencies, settings }
     }
 
-    fn generate_sample(&mut self) -> f32 {
+    fn generate_sample(&mut self, sample_rate: f32) -> f32 {
         let settings = self.settings.lock().unwrap();
         if settings.volume == 0.0 {
             return 0.0;
@@ -252,7 +372,7 @@ impl NoiseGenerator {
         for (i, band) in self.bands.iter_mut().enumerate() {
             let gain = settings.frequency_bands[i];
             let center_freq = self.center_frequencies[i];
-            sample += band.generate_sample(gain, center_freq, settings.perceptual_normalization);
+            sample += band.generate_sample(gain, center_freq, settings.perceptual_normalization, settings.sound_style, sample_rate);
         }
         
         // Apply master volume and soft limiting
@@ -328,6 +448,17 @@ impl InteractiveUI {
         
         let settings = self.settings.lock().unwrap();
         
+        // Show current sound style
+        queue!(stdout, SetForegroundColor(Color::Magenta))?;
+        match settings.sound_style {
+            SoundStyle::Vanilla => {
+                queue!(stdout, Print("Sound Style: Vanilla (Adjustable) - Press S to switch\n\r"))?;
+            }
+            SoundStyle::Rain => {
+                queue!(stdout, Print("Sound Style: Rain (Fixed Preset) - Press S to switch\n\r"))?;
+            }
+        }
+        
         // Show normalization status
         if settings.perceptual_normalization {
             queue!(stdout, SetForegroundColor(Color::Green))?;
@@ -337,7 +468,7 @@ impl InteractiveUI {
             queue!(stdout, Print("Mode: TECHNICAL (Flat response) - Press N to toggle\n\r"))?;
         }
         queue!(stdout, ResetColor)?;
-        queue!(stdout, Print("Controls: ↑/↓ select, ←/→ adjust, Q to quit\n\r\n\r"))?;
+        queue!(stdout, Print("Controls: ↑/↓ select, ←/→ adjust, S style, N mode, Q to quit\n\r\n\r"))?;
         
         // Volume slider
         self.draw_slider("Volume", settings.volume, 4, self.current_slider == 0)?;
@@ -408,6 +539,10 @@ impl InteractiveUI {
             KeyCode::Char('n') | KeyCode::Char('N') => {
                 let mut settings = self.settings.lock().unwrap();
                 settings.perceptual_normalization = !settings.perceptual_normalization;
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+                let mut settings = self.settings.lock().unwrap();
+                settings.sound_style = settings.sound_style.next();
             }
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                 return Ok(true); // Exit
@@ -518,6 +653,7 @@ fn create_audio_stream(
     running: Arc<AtomicBool>,
 ) -> Result<Stream> {
     let generator = Arc::new(Mutex::new(NoiseGenerator::new(settings, config.sample_rate.0 as f32)));
+    let sample_rate = config.sample_rate.0 as f32;
     
     let stream = device.build_output_stream(
         config,
@@ -531,7 +667,7 @@ fn create_audio_stream(
 
             if let Ok(mut generator_guard) = generator.lock() {
                 for sample in data.iter_mut() {
-                    *sample = generator_guard.generate_sample();
+                    *sample = generator_guard.generate_sample(sample_rate);
                 }
             }
         },
