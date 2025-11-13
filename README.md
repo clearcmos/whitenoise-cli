@@ -4,15 +4,15 @@ A customizable white noise generator for the command line, built with Rust for o
 
 ## Features
 
-- 🎵 **Professional DSP filtering** with 8 distinct frequency bands
-- 🎛️ **Real-time interactive control** - adjust frequencies while playing
-- 🧠 **Perceptual normalization** - Fletcher-Munson compensation (toggle with 'N')
-- 🎧 **Audio device selection** - choose your preferred output device
-- ⚡ **Low latency** - built with Rust for real-time audio performance  
-- 🖥️ **Cross-platform** - works on Linux, macOS, and Windows
-- 🎯 **NixOS optimized** - includes proper Nix development environment
-- 💻 **CLI-friendly** - perfect for terminal workflows and automation
-- 💾 **Settings persistence** - remembers your frequency preferences
+- **Professional DSP filtering** with 8 distinct frequency bands
+- **Real-time interactive control** - adjust frequencies while playing
+- **Perceptual normalization** - Fletcher-Munson compensation (toggle with 'N')
+- **Audio device selection** - choose your preferred output device
+- **Low latency** - built with Rust for real-time audio performance
+- **Cross-platform** - works on Linux, macOS, and Windows
+- **NixOS optimized** - includes proper Nix development environment
+- **CLI-friendly** - perfect for terminal workflows and automation
+- **Settings persistence** - remembers your frequency preferences
 
 ## Installation
 
@@ -55,7 +55,7 @@ cargo build --release
 
 **Interactive Interface:**
 ```
-🎵 Interactive White Noise Generator
+Interactive White Noise Generator
 Mode: TECHNICAL (Flat response) - Press N to toggle
 Controls: ↑/↓ select, ←/→ adjust, Q to quit
 
@@ -158,25 +158,25 @@ Press **'N'** to toggle between two modes:
 
 ## Use Cases
 
-### 🧘 Focus & Concentration
+### Focus & Concentration
 ```bash
 # Gentle background noise for work
 ./target/release/whitenoise -v 0.15
 ```
 
-### 😴 Sleep Aid
+### Sleep Aid
 ```bash
 # Soft, low-frequency white noise
 ./target/release/whitenoise -v 0.2 -m 50 -M 2000
 ```
 
-### 🎧 Audio Testing
+### Audio Testing
 ```bash
 # Full spectrum test on specific device
 ./target/release/whitenoise -v 0.5 -d "USB Headphones"
 ```
 
-### 🔇 Tinnitus Relief
+### Tinnitus Relief
 ```bash
 # Mid-frequency range, moderate volume
 ./target/release/whitenoise -v 0.3 -m 500 -M 8000
@@ -216,8 +216,8 @@ This project uses Nix for reproducible builds. See `CLAUDE.md` for detailed deve
 
 ## License
 
-[Add your preferred license here]
+MIT License - See LICENSE file for details
 
 ---
 
-**Enjoy your customizable white noise experience! 🎵**
+Enjoy your customizable white noise experience!
