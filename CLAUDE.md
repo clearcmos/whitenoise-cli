@@ -10,14 +10,19 @@ A customizable whitenoise CLI tool written in Rust, designed for NixOS/KDE/Wayla
 - PipeWire audio system (detected: PipeWire 1.4.7)
 
 ### Build Environment
-Use the provided `shell.nix` for consistent development environment:
+Use flakes (recommended) or legacy nix-shell:
 
 ```bash
+# Using flakes
+nix develop
+cargo build
+
+# Or legacy nix-shell
 nix-shell
 cargo build
 ```
 
-The shell provides:
+The dev environment provides:
 - Rust toolchain
 - ALSA development libraries
 - Proper PKG_CONFIG_PATH configuration

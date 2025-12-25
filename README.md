@@ -17,23 +17,40 @@ A customizable white noise generator for the command line, built with Rust for o
 
 ## Installation
 
-### Prerequisites
+### NixOS / Nix Flakes (Recommended)
 
-- **NixOS/Linux**: Nix package manager (included by default on NixOS)
-- **Audio System**: PipeWire, PulseAudio, or ALSA
-- **Rust**: Provided automatically via Nix shell
+Add to your NixOS configuration:
+
+```nix
+{
+  inputs.whitenoise.url = "github:clearcmos/whitenoise-cli";
+
+  # Add to your system packages
+  environment.systemPackages = [
+    inputs.whitenoise.packages.x86_64-linux.default
+  ];
+}
+```
+
+Or run directly without installing:
+
+```bash
+nix run github:clearcmos/whitenoise-cli
+```
 
 ### Build from Source
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/clearcmos/whitenoise-cli
 cd whitenoise-cli
 
-# Enter development environment
-nix-shell
+# Using flakes
+nix develop
+cargo build --release
 
-# Build the application
+# Or using legacy nix-shell
+nix-shell
 cargo build --release
 
 # The binary will be available at: target/release/whitenoise
