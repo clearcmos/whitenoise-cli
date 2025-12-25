@@ -4,6 +4,7 @@ A customizable white noise generator for the command line, built with Rust for o
 
 ## Features
 
+- **Sound styles** - Vanilla white noise or realistic Rain (embedded CC0 sample)
 - **Professional DSP filtering** with 8 distinct frequency bands
 - **Real-time interactive control** - adjust frequencies while playing
 - **Perceptual normalization** - Fletcher-Munson compensation (toggle with 'N')
@@ -49,6 +50,7 @@ cargo build --release
 # Controls:
 # ↑/↓ - Select frequency band or volume
 # ←/→ - Adjust selected parameter
+# S   - Switch sound style (Vanilla/Rain)
 # N   - Toggle perceptual normalization (Fletcher-Munson)
 # Q   - Quit
 ```
@@ -56,8 +58,9 @@ cargo build --release
 **Interactive Interface:**
 ```
 Interactive White Noise Generator
+Sound Style: Vanilla (Adjustable) - Press S to switch
 Mode: TECHNICAL (Flat response) - Press N to toggle
-Controls: ↑/↓ select, ←/→ adjust, Q to quit
+Controls: ↑/↓ select, ←/→ adjust, S style, N mode, Q to quit
 
 ► Volume      [██████████░░░░░░░░░░░░░░░░░░░░] 30.0%
   Sub Bass    [███████████████░░░░░░░░░░░░░░] 50.0%
@@ -119,8 +122,18 @@ Controls: ↑/↓ select, ←/→ adjust, Q to quit
 |-----|--------|
 | `↑/↓` | Navigate between volume and frequency bands |
 | `←/→` | Decrease/increase selected parameter |
+| `S` | Switch sound style (Vanilla/Rain) |
 | `N` | Toggle perceptual normalization (Fletcher-Munson) |
 | `Q/Esc` | Quit application |
+
+## Sound Styles
+
+| Style | Description |
+|-------|-------------|
+| **Vanilla** | Pure white noise with full frequency band control |
+| **Rain** | Realistic rain recording with seamless looping and EQ control |
+
+The Rain style uses an embedded CC0-licensed recording from BigSoundBank, with crossfade looping for seamless playback. Frequency bands still apply to shape the rain sound.
 
 ## Frequency Bands
 
