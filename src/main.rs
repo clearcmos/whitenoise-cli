@@ -193,83 +193,121 @@ impl BiquadFilter {
 }
 
 
-struct RainGenerator {
-    rng: SmallRng,
-    // Multiple filtered noise sources for realistic rain layers
-    low_filter_state: f32,
-    mid_filter_state: f32,
-    high_filter_state: f32,
-    droplet_timer: f32,
-    droplet_intensity: f32,
-    intensity_mod: f32,
-    mod_timer: f32,
+// Embedded rain sample (CC0 licensed from BigSoundBank)
+// 15-second loop of rain on puddles, 44.1kHz 16-bit mono
+static RAIN_WAV_DATA: &[u8] = include_bytes!("../assets/rain_loop.wav");
+
+struct RainSamplePlayer {
+    samples: Vec<f32>,
+    source_sample_rate: u32,
+    target_sample_rate: f32,
+    resample_position: f64,
+    crossfade_samples: usize, // Number of samples to crossfade
 }
 
-impl RainGenerator {
-    fn new() -> Self {
+impl RainSamplePlayer {
+    fn new(target_sample_rate: f32) -> Self {
+        // Decode the embedded WAV file
+        let cursor = std::io::Cursor::new(RAIN_WAV_DATA);
+        let reader = hound::WavReader::new(cursor).expect("Failed to read embedded rain sample");
+        let spec = reader.spec();
+
+        // Convert samples to f32 normalized to -1.0 to 1.0
+        let samples: Vec<f32> = if spec.bits_per_sample == 16 {
+            reader
+                .into_samples::<i16>()
+                .filter_map(|s| s.ok())
+                .map(|s| s as f32 / 32768.0)
+                .collect()
+        } else if spec.bits_per_sample == 24 {
+            reader
+                .into_samples::<i32>()
+                .filter_map(|s| s.ok())
+                .map(|s| s as f32 / 8388608.0)
+                .collect()
+        } else {
+            reader
+                .into_samples::<i32>()
+                .filter_map(|s| s.ok())
+                .map(|s| s as f32 / 2147483648.0)
+                .collect()
+        };
+
+        // Crossfade duration: ~2 seconds for smooth blending
+        let crossfade_samples = (spec.sample_rate as usize) * 2;
+
         Self {
-            rng: SmallRng::from_entropy(),
-            low_filter_state: 0.0,
-            mid_filter_state: 0.0,
-            high_filter_state: 0.0,
-            droplet_timer: 0.0,
-            droplet_intensity: 0.0,
-            intensity_mod: 1.0,
-            mod_timer: 0.0,
+            samples,
+            source_sample_rate: spec.sample_rate,
+            target_sample_rate,
+            resample_position: 0.0,
+            crossfade_samples,
         }
     }
-    
-    fn generate_sample(&mut self, sample_rate: f32) -> f32 {
-        // Layer 1: Low frequency rumble (heavy rain on surfaces)
-        let low_noise = (self.rng.r#gen::<f32>() - 0.5) * 0.4;
-        self.low_filter_state = 0.98 * self.low_filter_state + 0.02 * low_noise;
-        let low_layer = self.low_filter_state * 0.3;
-        
-        // Layer 2: Mid frequency body (main rain sound)
-        let mid_noise = (self.rng.r#gen::<f32>() - 0.5) * 0.6;
-        self.mid_filter_state = 0.85 * self.mid_filter_state + 0.15 * mid_noise;
-        let mid_layer = self.mid_filter_state * 0.8;
-        
-        // Layer 3: High frequency texture (droplets and splashes)
-        let high_noise = (self.rng.r#gen::<f32>() - 0.5) * 0.3;
-        self.high_filter_state = 0.6 * self.high_filter_state + 0.4 * high_noise;
-        let high_layer = self.high_filter_state * 0.4;
-        
-        // Layer 4: Individual droplet transients
-        if self.droplet_timer <= 0.0 {
-            self.droplet_intensity = 0.3 + self.rng.r#gen::<f32>() * 0.4;
-            self.droplet_timer = (20.0 + self.rng.r#gen::<f32>() * 60.0) * sample_rate / 44100.0;
-        } else {
-            self.droplet_timer -= 1.0;
+
+    fn get_sample_interpolated(&self, pos: f64) -> f32 {
+        let len = self.samples.len();
+        if len == 0 {
+            return 0.0;
         }
-        self.droplet_intensity *= 0.996;
-        
-        let droplet_transient = if self.droplet_intensity > 0.02 {
-            (self.rng.r#gen::<f32>() - 0.5) * self.droplet_intensity * 0.3
+
+        let idx = pos as usize % len;
+        let frac = pos - pos.floor();
+
+        let sample1 = self.samples[idx];
+        let sample2 = self.samples[(idx + 1) % len];
+
+        sample1 + (sample2 - sample1) * frac as f32
+    }
+
+    fn generate_sample(&mut self) -> f32 {
+        if self.samples.is_empty() {
+            return 0.0;
+        }
+
+        let len = self.samples.len();
+        let fade_start = len - self.crossfade_samples;
+        let current_idx = self.resample_position as usize;
+
+        let sample = if current_idx >= fade_start {
+            // We're in the crossfade zone - blend end with beginning
+            let fade_progress = (current_idx - fade_start) as f32 / self.crossfade_samples as f32;
+
+            // Smooth S-curve crossfade (sounds more natural than linear)
+            let fade_out = (std::f32::consts::PI * fade_progress / 2.0).cos();
+            let fade_in = (std::f32::consts::PI * fade_progress / 2.0).sin();
+
+            // Sample from current position (fading out)
+            let end_sample = self.get_sample_interpolated(self.resample_position);
+
+            // Sample from beginning (fading in) - offset by same amount into the file
+            let begin_pos = (current_idx - fade_start) as f64
+                + (self.resample_position - current_idx as f64);
+            let begin_sample = self.get_sample_interpolated(begin_pos);
+
+            end_sample * fade_out + begin_sample * fade_in
         } else {
-            0.0
+            // Normal playback
+            self.get_sample_interpolated(self.resample_position)
         };
-        
-        // Layer 5: Slow intensity modulation (natural variation)
-        if self.mod_timer <= 0.0 {
-            self.intensity_mod = 0.7 + self.rng.r#gen::<f32>() * 0.3;
-            self.mod_timer = (200.0 + self.rng.r#gen::<f32>() * 400.0) * sample_rate / 44100.0;
-        } else {
-            self.mod_timer -= 1.0;
+
+        // Advance position with resampling ratio
+        let ratio = self.source_sample_rate as f64 / self.target_sample_rate as f64;
+        self.resample_position += ratio;
+
+        // Loop back when we've finished the crossfade
+        if self.resample_position >= len as f64 {
+            // Jump to where the crossfade began blending in from
+            self.resample_position = self.resample_position - fade_start as f64;
         }
-        
-        // Combine all layers with intensity modulation
-        let combined = (low_layer + mid_layer + high_layer + droplet_transient) * self.intensity_mod;
-        
-        // Final limiting to prevent clipping
-        combined.max(-0.6).min(0.6)
+
+        sample
     }
 }
 
 struct FrequencyBandGenerator {
     rng: SmallRng,
     filter: BiquadFilter,
-    rain_generator: RainGenerator,
 }
 
 impl FrequencyBandGenerator {
@@ -286,39 +324,24 @@ impl FrequencyBandGenerator {
             let q = 1.5; // Moderate Q for good separation without ringing
             BiquadFilter::bandpass(center_freq, q, sample_rate)
         };
-        
+
         Self {
             rng: SmallRng::from_entropy(),
             filter,
-            rain_generator: RainGenerator::new(),
         }
     }
-    
-    fn generate_sample(&mut self, gain: f32, center_freq: f32, perceptual_normalization: bool, sound_style: SoundStyle, sample_rate: f32) -> f32 {        
-        // Generate base audio based on style
-        let base_audio = match sound_style {
-            SoundStyle::Vanilla => {
-                // Original clean white noise (frequency bands work normally)
-                if gain <= 0.001 {
-                    return 0.0;
-                }
-                (self.rng.r#gen::<f32>() - 0.5) * 2.0
-            }
-            SoundStyle::Rain => {
-                // Rain preset - NOT affected by frequency bands
-                // Generate once per band but only use center frequency band
-                if center_freq >= 500.0 && center_freq < 2000.0 {
-                    // Only the "Mid" band generates rain sound
-                    self.rain_generator.generate_sample(sample_rate)
-                } else {
-                    return 0.0; // Other bands are silent for rain
-                }
-            }
-        };
-        
+
+    fn generate_sample(&mut self, gain: f32, center_freq: f32, perceptual_normalization: bool) -> f32 {
+        // Only used for Vanilla white noise mode
+        if gain <= 0.001 {
+            return 0.0;
+        }
+
+        let base_audio = (self.rng.r#gen::<f32>() - 0.5) * 2.0;
+
         // Apply filter and gain
         let filtered = self.filter.process(base_audio);
-        
+
         // Apply Fletcher-Munson compensation if enabled
         let perceptual_gain = if perceptual_normalization {
             match center_freq {
@@ -333,7 +356,7 @@ impl FrequencyBandGenerator {
         } else {
             1.0 // Technical mode - no compensation
         };
-        
+
         // Apply gain with proper scaling
         filtered * gain * perceptual_gain * 0.8 // Scale down to prevent clipping when bands are summed
     }
@@ -343,6 +366,8 @@ struct NoiseGenerator {
     bands: Vec<FrequencyBandGenerator>,
     center_frequencies: Vec<f32>,
     settings: Arc<Mutex<AudioSettings>>,
+    rain_player: RainSamplePlayer,
+    rain_filters: Vec<BiquadFilter>, // EQ filters for rain sample
 }
 
 impl NoiseGenerator {
@@ -351,33 +376,100 @@ impl NoiseGenerator {
             .iter()
             .map(|band| FrequencyBandGenerator::new(band, sample_rate))
             .collect();
-        
-        let center_frequencies = FREQUENCY_BANDS
+
+        let center_frequencies: Vec<f32> = FREQUENCY_BANDS
             .iter()
             .map(|band| (band.min_freq + band.max_freq) / 2.0)
             .collect();
-        
-        Self { bands, center_frequencies, settings }
+
+        // Create bandpass filters for rain EQ (same frequencies as white noise bands)
+        let rain_filters = FREQUENCY_BANDS
+            .iter()
+            .map(|band| {
+                if band.min_freq <= 60.0 {
+                    BiquadFilter::lowpass(band.max_freq, sample_rate)
+                } else if band.max_freq >= 16000.0 {
+                    BiquadFilter::highpass(band.min_freq, sample_rate)
+                } else {
+                    let center = (band.min_freq + band.max_freq) / 2.0;
+                    BiquadFilter::bandpass(center, 1.5, sample_rate)
+                }
+            })
+            .collect();
+
+        Self {
+            bands,
+            center_frequencies,
+            settings,
+            rain_player: RainSamplePlayer::new(sample_rate),
+            rain_filters,
+        }
     }
 
-    fn generate_sample(&mut self, sample_rate: f32) -> f32 {
+    fn generate_sample(&mut self) -> f32 {
         let settings = self.settings.lock().unwrap();
         if settings.volume == 0.0 {
             return 0.0;
         }
 
-        let mut sample = 0.0;
-        
-        // Sum all frequency bands
-        for (i, band) in self.bands.iter_mut().enumerate() {
-            let gain = settings.frequency_bands[i];
-            let center_freq = self.center_frequencies[i];
-            sample += band.generate_sample(gain, center_freq, settings.perceptual_normalization, settings.sound_style, sample_rate);
-        }
-        
+        let sound_style = settings.sound_style;
+        let perceptual = settings.perceptual_normalization;
+        let volume = settings.volume;
+        let frequency_bands = settings.frequency_bands;
+        drop(settings); // Release lock before generating audio
+
+        let sample = match sound_style {
+            SoundStyle::Rain => {
+                // Get the rain sample
+                let rain_sample = self.rain_player.generate_sample();
+
+                // Apply EQ bands to the rain - split into bands, apply gains, recombine
+                let mut sum = 0.0;
+                for (i, filter) in self.rain_filters.iter_mut().enumerate() {
+                    let gain = frequency_bands[i];
+                    if gain <= 0.001 {
+                        // Still need to run filter to keep state updated, but don't add to output
+                        let _ = filter.process(rain_sample);
+                        continue;
+                    }
+
+                    let filtered = filter.process(rain_sample);
+
+                    // Apply Fletcher-Munson compensation if enabled
+                    let center_freq = self.center_frequencies[i];
+                    let perceptual_gain = if perceptual {
+                        match center_freq {
+                            f if f < 100.0 => 2.8,
+                            f if f < 500.0 => 2.0,
+                            f if f < 1000.0 => 1.3,
+                            f if f < 4000.0 => 1.0,
+                            f if f < 6000.0 => 0.8,
+                            f if f < 10000.0 => 1.4,
+                            _ => 2.2,
+                        }
+                    } else {
+                        1.0
+                    };
+
+                    sum += filtered * gain * perceptual_gain * 0.8;
+                }
+                sum
+            }
+            SoundStyle::Vanilla => {
+                // Sum all frequency bands for white noise
+                let mut sum = 0.0;
+                for (i, band) in self.bands.iter_mut().enumerate() {
+                    let gain = frequency_bands[i];
+                    let center_freq = self.center_frequencies[i];
+                    sum += band.generate_sample(gain, center_freq, perceptual);
+                }
+                sum
+            }
+        };
+
         // Apply master volume and soft limiting
-        let final_sample = sample * settings.volume;
-        
+        let final_sample = sample * volume;
+
         // Soft clipping to prevent harsh clipping
         if final_sample > 0.95 {
             0.95 + 0.05 * (final_sample - 0.95).tanh()
@@ -653,8 +745,7 @@ fn create_audio_stream(
     running: Arc<AtomicBool>,
 ) -> Result<Stream> {
     let generator = Arc::new(Mutex::new(NoiseGenerator::new(settings, config.sample_rate.0 as f32)));
-    let sample_rate = config.sample_rate.0 as f32;
-    
+
     let stream = device.build_output_stream(
         config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
@@ -667,7 +758,7 @@ fn create_audio_stream(
 
             if let Ok(mut generator_guard) = generator.lock() {
                 for sample in data.iter_mut() {
-                    *sample = generator_guard.generate_sample(sample_rate);
+                    *sample = generator_guard.generate_sample();
                 }
             }
         },
