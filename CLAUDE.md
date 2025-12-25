@@ -59,8 +59,8 @@ nix-shell --run "cargo build"
 # Release build  
 nix-shell --run "cargo build --release"
 
-# Run with custom options
-nix-shell --run "./target/debug/whitenoise -v 0.2 -d pipewire"
+# Run with specific device
+nix-shell --run "./target/debug/whitenoise -d pipewire"
 ```
 
 ## Testing Commands
@@ -126,7 +126,7 @@ nix-shell --run "./target/debug/whitenoise --non-interactive"
 - Missing SmallRng: verify rand features include "small_rng"
 - Keyword conflicts: use r# prefix for reserved words
 
-### Runtime Issues  
+### Runtime Issues
 - No audio output: check device selection with `--list-devices`
 - Permission errors: ensure user in audio group
-- Latency issues: try different sample rates with `-s`
+- Latency issues: check PipeWire/PulseAudio settings

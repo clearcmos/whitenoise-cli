@@ -93,28 +93,14 @@ Controls: ↑/↓ select, ←/→ adjust, S style, N mode, Q to quit
 ./target/release/whitenoise --device bluetooth
 ```
 
-### Advanced Configuration
-
-```bash
-# Custom frequency range and sample rate
-./target/release/whitenoise \
-  --volume 0.2 \
-  --min-freq 50 \
-  --max-freq 15000 \
-  --sample-rate 44100
-
-# Ultra-quiet background noise
-./target/release/whitenoise -v 0.05 -m 100 -M 8000
-```
-
 ## Command Line Options
 
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--list-devices` | `-l` | - | List available audio devices |
-| `--device` | `-d` | - | Select specific audio device |
-| `--non-interactive` | - | - | Run without interactive UI |
-| `--help` | `-h` | - | Show help information |
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--list-devices` | `-l` | List available audio devices |
+| `--device` | `-d` | Select specific audio device |
+| `--non-interactive` | | Run without interactive UI (uses saved settings) |
+| `--help` | `-h` | Show help information |
 
 ## Interactive Controls
 
@@ -172,28 +158,19 @@ Press **'N'** to toggle between two modes:
 ## Use Cases
 
 ### Focus & Concentration
-```bash
-# Gentle background noise for work
-./target/release/whitenoise -v 0.15
-```
+Start the app and adjust volume/EQ interactively for gentle background noise.
 
 ### Sleep Aid
-```bash
-# Soft, low-frequency white noise
-./target/release/whitenoise -v 0.2 -m 50 -M 2000
-```
+Use Rain mode (press S) with reduced high frequencies for a soothing sound.
 
 ### Audio Testing
 ```bash
-# Full spectrum test on specific device
-./target/release/whitenoise -v 0.5 -d "USB Headphones"
+# Test on specific device
+./target/release/whitenoise -d "USB Headphones"
 ```
 
 ### Tinnitus Relief
-```bash
-# Mid-frequency range, moderate volume
-./target/release/whitenoise -v 0.3 -m 500 -M 8000
-```
+Adjust mid-frequency bands interactively to find the most comfortable masking sound.
 
 ## Stopping the Application
 
@@ -211,16 +188,17 @@ Press `Ctrl+C` to gracefully stop the white noise generator.
 2. Clean build: `cargo clean && cargo build --release`
 
 ### Audio Latency/Crackling
-1. Try different sample rate: `./target/release/whitenoise -s 44100`
-2. Check system audio settings
-3. Ensure no other applications are using exclusive audio access
+1. Check system audio settings (PipeWire/PulseAudio configuration)
+2. Ensure no other applications are using exclusive audio access
+3. Try a different audio device: `./target/release/whitenoise -d pipewire`
 
 ## Technical Details
 
 - **Language**: Rust 2024 Edition
 - **Audio Backend**: CPAL (Cross-Platform Audio Library)
 - **Supported Systems**: Linux (ALSA/PipeWire), macOS (CoreAudio), Windows (WASAPI)
-- **Memory Usage**: Minimal (~1-2MB RAM)
+- **Binary Size**: ~2.5MB (includes embedded rain sample)
+- **Memory Usage**: ~3-4MB RAM
 - **CPU Usage**: Very low (<1% on modern systems)
 
 ## Contributing
