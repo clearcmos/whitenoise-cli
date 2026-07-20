@@ -2,7 +2,7 @@
 
 `whitenoise` is a small Rust terminal application for continuous white, pink, and brown noise and rain ambience. It provides a master volume, an eight-band graphic EQ, live source switching, settings persistence, and explicit audio host/device selection.
 
-The current version is `0.2.0`, with unreleased changes tracked in `CHANGELOG.md`. It requires Rust 1.85 or newer.
+The current release is `0.3.0`. It requires Rust 1.85 or newer.
 
 ## What works
 
