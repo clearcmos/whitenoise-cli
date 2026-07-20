@@ -2,7 +2,7 @@
 
 `whitenoise` is a small Rust terminal application for continuous white, pink, and brown noise and rain ambience. It provides a master volume, an eight-band graphic EQ, live source switching, settings persistence, and explicit audio host/device selection.
 
-The current release is `0.2.0`. It requires Rust 1.85 or newer.
+The current version is `0.2.0`, with unreleased changes tracked in `CHANGELOG.md`. It requires Rust 1.85 or newer.
 
 ## What works
 
@@ -177,8 +177,11 @@ Output is currently mono-compatible: the same generated frame is copied to all o
 cargo fmt --all --check
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
+cargo llvm-cov --locked --all-features --fail-under-lines 70
 cargo build --release
 ```
+
+The coverage command matches the CI gate and needs `cargo-llvm-cov` installed (`cargo install cargo-llvm-cov`).
 
 Unit tests cover settings migration, sanitization, and file persistence, neutral-EQ transparency, EQ stability while sliders move, pink and brown spectral slopes and levels, device name matching, interactive key handling, output frame/channel handling, rain asset decoding and resampling, limiter bounds, style-switching crossfades, and long extreme-setting runs. Coverage is gated in CI.
 

@@ -2,7 +2,7 @@
 
 ## Project
 
-`whitenoise` is a Rust 2024 desktop CLI for white noise and looped rain ambience. Linux is the currently exercised platform, but audio and terminal I/O use CPAL and Crossterm rather than Linux-specific application code.
+`whitenoise` is a Rust 2024 desktop CLI for white, pink, and brown noise and looped rain ambience. Linux is the currently exercised platform, but audio and terminal I/O use CPAL and Crossterm rather than Linux-specific application code.
 
 The native Rust toolchain is the primary development environment. The Nix flake and `shell.nix` are optional compatibility paths.
 
@@ -21,8 +21,11 @@ cargo build
 cargo test
 cargo fmt --all --check
 cargo clippy --all-targets --all-features -- -D warnings
+cargo llvm-cov --locked --all-features --fail-under-lines 70
 cargo build --release
 ```
+
+The coverage command mirrors the CI gate and needs `cargo-llvm-cov` installed.
 
 Manual smoke checks:
 

@@ -1,5 +1,5 @@
 {
-  description = "Interactive white-noise and rain ambience generator";
+  description = "Interactive white/pink/brown noise and rain ambience generator";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -30,7 +30,7 @@
           ];
 
           meta = with pkgs.lib; {
-            description = "Interactive white-noise and rain ambience generator";
+            description = "Interactive white/pink/brown noise and rain ambience generator";
             homepage = "https://github.com/clearcmos/whitenoise-cli";
             license = licenses.mit;
             maintainers = [];

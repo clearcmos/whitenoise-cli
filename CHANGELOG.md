@@ -10,6 +10,12 @@
 
 - Adjusting low EQ bands (especially Sub Bass) could make the filter blow up into loud distortion, or go permanently silent at high sample rates. EQ changes are now smoothed in the gain domain with coefficients rebuilt from the smoothed gain, instead of interpolating raw biquad coefficients. Filters also flush non-finite state so a band can never stay poisoned.
 
+### Verification
+
+- Harden CI: SHA-pinned actions, least-privilege permissions, concurrency cancellation, per-job timeouts, an aggregate gate job, and Dependabot for workflow actions.
+- Gate coverage in CI at 70 percent lines via cargo-llvm-cov.
+- Add tests for device name matching, interactive key handling, settings file persistence, EQ stability while sliders move, colored-noise spectral slopes and levels, and style-switching crossfades.
+
 ## 0.2.0 - 2026-07-11
 
 ### Fixed
