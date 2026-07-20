@@ -1,16 +1,25 @@
 [package]
 name = "whitenoise"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Interactive white-noise and rain ambience generator"
+license = "MIT"
+repository = "https://github.com/clearcmos/whitenoise-cli"
+readme = "README.md"
+
+[features]
+default = []
+pulseaudio = ["cpal/pulseaudio"]
 
 [dependencies]
-cpal = "0.15"
-clap = { version = "4.0", features = ["derive"] }
+cpal = "0.18.1"
+clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 ctrlc = "3.0"
-crossterm = "0.27"
+crossterm = "0.29"
 serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
-dirs = "5.0"
-rand = { version = "0.8", features = ["small_rng"] }
+toml = "1.1"
+dirs = "6.0"
+rand = "0.10.1"
 hound = "3.5"

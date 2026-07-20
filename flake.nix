@@ -1,5 +1,5 @@
 {
-  description = "A customizable white noise generator CLI with rain sounds";
+  description = "Interactive white-noise and rain ambience generator";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -13,7 +13,7 @@
 
         whitenoise = pkgs.rustPlatform.buildRustPackage {
           pname = "whitenoise";
-          version = "0.1.0";
+          version = "0.2.0";
 
           src = ./.;
 
@@ -30,7 +30,7 @@
           ];
 
           meta = with pkgs.lib; {
-            description = "Interactive white noise generator with frequency band control and rain sounds";
+            description = "Interactive white-noise and rain ambience generator";
             homepage = "https://github.com/clearcmos/whitenoise-cli";
             license = licenses.mit;
             maintainers = [];

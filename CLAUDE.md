@@ -1,137 +1,76 @@
-# Claude Development Notes
+# Development Notes
 
-## Project Overview
-A customizable whitenoise CLI tool written in Rust, designed for NixOS/KDE/Wayland with PipeWire audio support.
+## Project
 
-## Development Setup
+`whitenoise` is a Rust 2024 desktop CLI for white noise and looped rain ambience. Linux is the currently exercised platform, but audio and terminal I/O use CPAL and Crossterm rather than Linux-specific application code.
 
-### Prerequisites
-- NixOS with Nix package manager
-- PipeWire audio system (detected: PipeWire 1.4.7)
+The native Rust toolchain is the primary development environment. The Nix flake and `shell.nix` are optional compatibility paths.
 
-### Build Environment
-Use flakes (recommended) or legacy nix-shell:
+## Prerequisites
+
+- Rust 1.85 or newer
+- Linux: `pkg-config` and ALSA development headers
+- Optional `pulseaudio` feature: PulseAudio development headers
+
+See `README.md` for distribution-specific package names.
+
+## Commands
 
 ```bash
-# Using flakes
-nix develop
 cargo build
-
-# Or legacy nix-shell
-nix-shell
-cargo build
+cargo test
+cargo fmt --all --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo build --release
 ```
 
-The dev environment provides:
-- Rust toolchain
-- ALSA development libraries
-- Proper PKG_CONFIG_PATH configuration
+Manual smoke checks:
 
-### Key Dependencies
-- `cpal` (0.15) - Cross-platform audio library
-- `clap` (4.0) - CLI argument parsing with derive features
-- `rand` (0.8) - Random number generation with `small_rng` feature
-- `anyhow` (1.0) - Error handling
-- `ctrlc` (3.0) - Signal handling for graceful shutdown
-- `hound` (3.5) - WAV audio decoding for embedded rain sample
+```bash
+cargo run -- --help
+cargo run -- --list-hosts
+cargo run -- --list-devices
+cargo run -- --volume 10
+cargo run -- --non-interactive --volume 10 --style rain
+```
 
 ## Architecture
 
-### Core Components
-1. **NoiseGenerator** - Thread-safe audio generation with EQ band processing
-2. **RainSamplePlayer** - Embedded WAV playback with crossfade looping
-3. **FrequencyBandGenerator** - Biquad-filtered noise for each EQ band
-4. **Audio Stream** - Real-time audio output via cpal with mutex-protected generator
-5. **CLI Interface** - Clap-based argument parsing with customization options
-6. **Device Management** - Audio device discovery and selection
+- `src/main.rs`: argument parsing, lifecycle, and startup safety
+- `src/device.rs`: CPAL host/device discovery and deterministic name matching
+- `src/settings.rs`: settings model, legacy migration, validation, and persistence
+- `src/audio.rs`: rain decoding/looping, white/pink/brown sources, graphic EQ, smoothing, limiting, and typed CPAL callbacks
+- `src/ui.rs`: interactive terminal rendering and controls
+- `assets/rain_loop.wav`: embedded mono rain recording
 
-### Embedded Assets
-- `assets/rain_loop.wav` - 15-second CC0 rain sample from BigSoundBank
-- Embedded at compile time via `include_bytes!`
-- Seamless looping with 2-second S-curve crossfade
+## Real-time audio rules
 
-### Thread Safety
-- Uses `Arc<Mutex<NoiseGenerator>>` for cross-thread access in audio callback
-- `Arc<AtomicBool>` for clean shutdown signaling
-- SmallRng instead of ThreadRng for Send trait compatibility
+- Generate once per audio frame, then populate every interleaved channel.
+- Do not allocate, block, decode files, print, or take a blocking mutex in the audio callback.
+- Read UI settings with `try_lock` once per callback buffer and retain the last snapshot on contention.
+- Keep source and parameter changes ramped to prevent discontinuities.
+- Smooth EQ changes in the gain (dB) domain and recompute biquad coefficients from the smoothed gain. Never interpolate raw biquad coefficients: the low bands have near-unit-circle poles and interpolated intermediates blow up (worst on sub bass, worse at higher sample rates).
+- Neutral EQ must remain an exact identity transform.
+- Any new DSP path needs finite/bounded-output tests at extreme settings.
 
-## Build Commands
+## Behavior worth preserving
 
-```bash
-# Development build
-nix-shell --run "cargo build"
+- Interactive mode starts muted unless `--volume` is supplied.
+- Non-interactive mode must fail clearly rather than run indefinitely at zero volume.
+- Legacy `sound_style = "Vanilla"` and `perceptual_normalization` settings remain readable.
+- The listening contour is a heuristic preset, not a claimed equal-loudness calibration.
+- Pink and brown filters are designed at startup for the actual sample rate; spectral-slope tests pin them to -3 and -6 dB/octave.
+- The rain source advances once per output frame regardless of channel count.
 
-# Release build  
-nix-shell --run "cargo build --release"
+## Audio backends
 
-# Run with specific device
-nix-shell --run "./target/debug/whitenoise -d pipewire"
-```
+The default Linux build uses CPAL's ALSA host, which normally reaches PipeWire through its ALSA compatibility layer. A PulseAudio host can be compiled with `--features pulseaudio` and selected with `--host pulseaudio`.
 
-## Testing Commands
+Do not assume NixOS, KDE, Wayland, a particular PipeWire version, or a specific device name in code or documentation.
 
-```bash
-# List available audio devices
-nix-shell --run "./target/debug/whitenoise --list-devices"
+## Decision log
 
-# Interactive mode with real-time frequency control
-nix-shell --run "./target/debug/whitenoise"
-
-# Test perceptual normalization toggle (press 'N' while running)
-nix-shell --run "./target/debug/whitenoise"
-
-# Non-interactive mode
-nix-shell --run "./target/debug/whitenoise --non-interactive"
-```
-
-## Technical Notes
-
-### Sound Styles
-- **Vanilla**: Pure white noise split into 8 frequency bands with independent gain
-- **Rain**: Embedded WAV sample with crossfade looping, processed through same EQ
-
-### Audio DSP Implementation
-- **Biquad filters**: Professional-grade lowpass, highpass, and bandpass filters
-- **Frequency band separation**: 8 distinct bands with proper center frequencies
-- **Perceptual normalization**: Fletcher-Munson compensation for equal loudness
-- **Real-time parameter updates**: All settings change instantly during playback
-- **Soft limiting**: Prevents harsh clipping when multiple bands are active
-- **Crossfade looping**: S-curve (cosine) blend for seamless rain sample loops
-- **Linear interpolation resampling**: Adapts embedded 44.1kHz sample to output rate
-
-### Perceptual Normalization (Fletcher-Munson)
-- **Technical mode** (default): Flat frequency response for professional control
-- **Perceptual mode** ('N' key): Compensated for human hearing sensitivity
-- **Compensation factors**:
-  - Sub Bass (<100Hz): 2.8x boost
-  - Bass (100-500Hz): 2.0x boost  
-  - Mid (500-4000Hz): 1.0x reference
-  - Presence (4-6kHz): 0.8x slight cut
-  - Air (>10kHz): 2.2x boost
-
-### Audio System Compatibility
-- Works with PipeWire (primary)
-- Falls back to ALSA
-- Supports device selection by name matching
-
-### Rust Edition & Compatibility
-- Uses Rust 2024 edition
-- Handles `gen` keyword conflict with `r#gen` escape
-- SmallRng requires explicit feature flag for thread safety
-
-### NixOS Integration
-- `shell.nix` provides ALSA development headers
-- PKG_CONFIG_PATH properly configured for alsa-sys compilation
-- No system-level audio library installation required
-
-## Troubleshooting
-
-### Build Issues
-- If alsa-sys fails: ensure you're in nix-shell
-- Missing SmallRng: verify rand features include "small_rng"
-- Keyword conflicts: use r# prefix for reserved words
-
-### Runtime Issues
-- No audio output: check device selection with `--list-devices`
-- Permission errors: ensure user in audio group
-- Latency issues: check PipeWire/PulseAudio settings
+- 2026-07-19: EQ changes are smoothed in the gain (dB) domain and coefficients are rebuilt from the smoothed gain. Motivated by a real bug: per-sample linear interpolation of raw biquad coefficients drove the Sub Bass band (near-unit-circle poles) into transient blow-ups up to 44 dB over the signal at 48 kHz and to infinity at 96 kHz and above. Filters also flush non-finite state so a poisoned band recovers instead of going silent until restart.
+- 2026-07-19: Pink noise is designed at startup for the actual device sample rate (matched-Z pole/zero ladder plus a bisection-solved correction zero) instead of using fixed 44.1 kHz coefficients, which are 3 to 5 dB off near 16 kHz at other rates. Verified to within about 0.25 dB of the ideal -3 dB/octave from 20 Hz to 20 kHz at rates from 22.05 to 384 kHz.
+- 2026-07-20: Coverage is gated in CI at 60% lines via cargo-llvm-cov (measured 61.4% when the gate was added; device.rs and ui.rs had no tests yet). Ratchet to 70 once those modules gain tests; never lower the gate.
+- 2026-07-20: Cargo dependency updates are deliberate and manual. Dependabot watches GitHub Actions only; CI enforces `--locked` everywhere so drift cannot slip in through a stale lockfile.
