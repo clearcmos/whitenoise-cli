@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # GitHub Actions only. Cargo dependency updates are deliberate and manual;
+  # see the decision log in CLAUDE.md.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
