@@ -55,7 +55,7 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Coverage gate
-        run: cargo llvm-cov --locked --all-features --fail-under-lines 60
+        run: cargo llvm-cov --locked --all-features --fail-under-lines 70
 
   ci-ok:
     needs: [checks, coverage]

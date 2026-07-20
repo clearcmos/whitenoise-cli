@@ -78,25 +78,37 @@ fn find_device_by_name(host: &Host, requested: &str) -> Result<Device> {
         })
         .collect();
 
-    if let Some((device, _)) = devices
+    let names: Vec<String> = devices.iter().map(|(_, name)| name.clone()).collect();
+    let index = match_device_name(&names, requested)?;
+    Ok(devices[index].0.clone())
+}
+
+// The name-matching contract, kept separate from CPAL so it is testable:
+// a case-insensitive exact match wins, then a unique substring match; zero
+// or multiple substring matches fail with the candidates listed rather than
+// selecting an arbitrary device.
+fn match_device_name(names: &[String], requested: &str) -> Result<usize> {
+    if let Some(index) = names
         .iter()
-        .find(|(_, name)| name.eq_ignore_ascii_case(requested))
+        .position(|name| name.eq_ignore_ascii_case(requested))
     {
-        return Ok(device.clone());
+        return Ok(index);
     }
 
     let requested = requested.to_lowercase();
-    let partial_matches: Vec<_> = devices
+    let partial_matches: Vec<usize> = names
         .iter()
+        .enumerate()
         .filter(|(_, name)| name.to_lowercase().contains(&requested))
+        .map(|(index, _)| index)
         .collect();
 
     match partial_matches.as_slice() {
-        [(device, _)] => Ok(device.clone()),
+        [index] => Ok(*index),
         [] => {
-            let names = devices
+            let names = names
                 .iter()
-                .map(|(_, name)| name.as_str())
+                .map(String::as_str)
                 .collect::<Vec<_>>()
                 .join(", ");
             bail!("output device was not found (available: {names})")
@@ -104,7 +116,7 @@ fn find_device_by_name(host: &Host, requested: &str) -> Result<Device> {
         matches => {
             let names = matches
                 .iter()
-                .map(|(_, name)| name.as_str())
+                .map(|index| names[*index].as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
             bail!("device name is ambiguous; it matches: {names}")
@@ -117,4 +129,65 @@ fn host_names() -> Vec<String> {
         .into_iter()
         .map(|host| host.to_string())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn exact_match_is_case_insensitive() {
+        let devices = names(&["Family 17h HD Audio Controller", "USB Headphones"]);
+        let index = match_device_name(&devices, "usb headphones").unwrap();
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn exact_match_wins_over_substring_matches() {
+        // "USB" is a substring of both names, but an exact (case-insensitive)
+        // name match must win instead of failing as ambiguous.
+        let devices = names(&["USB Headphones", "USB"]);
+        let index = match_device_name(&devices, "usb").unwrap();
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn unique_substring_match_is_accepted() {
+        let devices = names(&["HDMI Output", "USB Headphones"]);
+        let index = match_device_name(&devices, "headph").unwrap();
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn ambiguous_substring_match_is_rejected_with_candidates() {
+        let devices = names(&["USB Headphones", "USB Speakers", "HDMI Output"]);
+        let error = match_device_name(&devices, "usb ").unwrap_err().to_string();
+        assert!(error.contains("ambiguous"), "unexpected error: {error}");
+        assert!(error.contains("USB Headphones"));
+        assert!(error.contains("USB Speakers"));
+        assert!(!error.contains("HDMI Output"));
+    }
+
+    #[test]
+    fn no_match_lists_available_devices() {
+        let devices = names(&["HDMI Output", "USB Headphones"]);
+        let error = match_device_name(&devices, "bluetooth")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not found"), "unexpected error: {error}");
+        assert!(error.contains("HDMI Output, USB Headphones"));
+    }
+
+    #[test]
+    fn duplicate_names_resolve_to_the_first_device() {
+        // ALSA can expose identical descriptions; matching must stay
+        // deterministic rather than depending on iteration luck.
+        let devices = names(&["Duplicate", "Duplicate"]);
+        let index = match_device_name(&devices, "duplicate").unwrap();
+        assert_eq!(index, 0);
+    }
 }

@@ -234,3 +234,117 @@ impl Drop for TerminalSession {
         let _ = execute!(io::stdout(), cursor::Show, LeaveAlternateScreen);
     }
 }
+
+// Key handling and slider adjustment are tested directly; the rendering and
+// raw-terminal paths (draw, draw_slider, TerminalSession, run) are exempt as
+// terminal-bound, per the CLAUDE.md decision log.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::SoundStyle;
+
+    fn ui() -> InteractiveUi {
+        InteractiveUi::new(
+            Arc::new(Mutex::new(AudioSettings::default())),
+            Arc::new(AtomicBool::new(true)),
+        )
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn settings(ui: &InteractiveUi) -> AudioSettings {
+        *ui.settings.lock().unwrap()
+    }
+
+    #[test]
+    fn selection_clamps_at_both_ends() {
+        let mut ui = ui();
+        ui.handle_key(key(KeyCode::Up));
+        assert_eq!(ui.selected, 0);
+
+        for _ in 0..FREQUENCY_BANDS.len() + 5 {
+            ui.handle_key(key(KeyCode::Down));
+        }
+        assert_eq!(ui.selected, FREQUENCY_BANDS.len());
+    }
+
+    #[test]
+    fn left_right_adjust_volume_in_steps_and_clamp() {
+        let mut ui = ui();
+        ui.handle_key(key(KeyCode::Right));
+        assert!((settings(&ui).volume - 0.05).abs() < 1e-6);
+
+        for _ in 0..40 {
+            ui.handle_key(key(KeyCode::Right));
+        }
+        assert_eq!(settings(&ui).volume, 1.0);
+
+        for _ in 0..40 {
+            ui.handle_key(key(KeyCode::Left));
+        }
+        assert_eq!(settings(&ui).volume, 0.0);
+    }
+
+    #[test]
+    fn adjusting_a_band_only_touches_that_band() {
+        let mut ui = ui();
+        ui.handle_key(key(KeyCode::Down));
+        ui.handle_key(key(KeyCode::Right));
+
+        let current = settings(&ui);
+        assert!((current.frequency_bands[0] - 0.55).abs() < 1e-6);
+        assert!(
+            current.frequency_bands[1..]
+                .iter()
+                .all(|value| *value == 0.5)
+        );
+        assert_eq!(current.volume, 0.0);
+    }
+
+    #[test]
+    fn s_cycles_the_sound_style() {
+        let mut ui = ui();
+        ui.handle_key(key(KeyCode::Char('s')));
+        assert_eq!(settings(&ui).sound_style, SoundStyle::Pink);
+        ui.handle_key(key(KeyCode::Char('S')));
+        assert_eq!(settings(&ui).sound_style, SoundStyle::Brown);
+    }
+
+    #[test]
+    fn n_toggles_the_listening_contour() {
+        let mut ui = ui();
+        ui.handle_key(key(KeyCode::Char('n')));
+        assert!(settings(&ui).listening_contour);
+        ui.handle_key(key(KeyCode::Char('N')));
+        assert!(!settings(&ui).listening_contour);
+    }
+
+    #[test]
+    fn r_resets_every_band_but_not_the_volume() {
+        let mut ui = ui();
+        {
+            let mut locked = ui.settings.lock().unwrap();
+            locked.frequency_bands = [0.9; FREQUENCY_BANDS.len()];
+            locked.volume = 0.7;
+        }
+        ui.handle_key(key(KeyCode::Char('r')));
+
+        let current = settings(&ui);
+        assert_eq!(current.frequency_bands, [0.5; FREQUENCY_BANDS.len()]);
+        assert_eq!(current.volume, 0.7);
+    }
+
+    #[test]
+    fn quit_keys_signal_exit_and_ordinary_keys_do_not() {
+        let mut ui = ui();
+        assert!(ui.handle_key(key(KeyCode::Char('q'))));
+        assert!(ui.handle_key(key(KeyCode::Char('Q'))));
+        assert!(ui.handle_key(key(KeyCode::Esc)));
+        assert!(ui.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+
+        assert!(!ui.handle_key(key(KeyCode::Char('x'))));
+        assert!(!ui.handle_key(key(KeyCode::Right)));
+    }
+}

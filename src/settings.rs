@@ -163,8 +163,11 @@ pub fn config_path() -> PathBuf {
 }
 
 pub fn load_settings() -> Result<AudioSettings> {
-    let path = config_path();
-    let content = match fs::read_to_string(&path) {
+    load_settings_from(&config_path())
+}
+
+fn load_settings_from(path: &std::path::Path) -> Result<AudioSettings> {
+    let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(AudioSettings::default()),
         Err(error) => {
@@ -178,14 +181,17 @@ pub fn load_settings() -> Result<AudioSettings> {
 }
 
 pub fn save_settings(settings: &AudioSettings) -> Result<()> {
-    let path = config_path();
+    save_settings_to(&config_path(), settings)
+}
+
+fn save_settings_to(path: &std::path::Path, settings: &AudioSettings) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
     let content = toml::to_string_pretty(&settings.sanitize())?;
-    fs::write(&path, content).with_context(|| format!("failed to write {}", path.display()))
+    fs::write(path, content).with_context(|| format!("failed to write {}", path.display()))
 }
 
 #[cfg(test)]
@@ -223,6 +229,72 @@ mod tests {
         assert_eq!(settings.volume, 0.0);
         assert_eq!(settings.frequency_bands, [0.5; FREQUENCY_BANDS.len()]);
         assert_eq!(settings.sound_style, SoundStyle::Rain);
+    }
+
+    fn scratch_settings_path(label: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "whitenoise-settings-test-{}-{label}",
+            std::process::id()
+        ));
+        path.push("nested"); // exercises parent-directory creation on save
+        path.push("settings.toml");
+        path
+    }
+
+    #[test]
+    fn settings_survive_a_save_and_load_round_trip() {
+        let path = scratch_settings_path("round-trip");
+        let saved = AudioSettings {
+            volume: 0.35,
+            frequency_bands: [0.0, 0.1, 0.2, 0.3, 0.6, 0.7, 0.8, 1.0],
+            listening_contour: true,
+            sound_style: SoundStyle::Brown,
+        };
+
+        save_settings_to(&path, &saved).unwrap();
+        let loaded = load_settings_from(&path).unwrap();
+        assert_eq!(loaded, saved);
+
+        std::fs::remove_dir_all(path.ancestors().nth(2).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn missing_settings_file_yields_defaults() {
+        let path = scratch_settings_path("missing");
+        let loaded = load_settings_from(&path).unwrap();
+        assert_eq!(loaded, AudioSettings::default());
+    }
+
+    #[test]
+    fn malformed_settings_file_reports_the_path() {
+        let path = scratch_settings_path("malformed");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "volume = \"not a number\"").unwrap();
+
+        let error = format!("{:#}", load_settings_from(&path).unwrap_err());
+        assert!(
+            error.contains("failed to parse"),
+            "unexpected error: {error}"
+        );
+        assert!(error.contains("settings.toml"));
+
+        std::fs::remove_dir_all(path.ancestors().nth(2).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn out_of_range_values_are_sanitized_on_save() {
+        let path = scratch_settings_path("sanitize-on-save");
+        let saved = AudioSettings {
+            volume: 7.0,
+            ..AudioSettings::default()
+        };
+
+        save_settings_to(&path, &saved).unwrap();
+        let loaded = load_settings_from(&path).unwrap();
+        assert_eq!(loaded.volume, 1.0);
+
+        std::fs::remove_dir_all(path.ancestors().nth(2).unwrap()).unwrap();
     }
 
     #[test]

@@ -180,7 +180,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo build --release
 ```
 
-Unit tests cover settings migration and sanitization, neutral-EQ transparency, EQ stability while sliders move, pink and brown spectral slopes and levels, output frame/channel handling, rain asset decoding and resampling, limiter bounds, style-switching crossfades, and long extreme-setting runs.
+Unit tests cover settings migration, sanitization, and file persistence, neutral-EQ transparency, EQ stability while sliders move, pink and brown spectral slopes and levels, device name matching, interactive key handling, output frame/channel handling, rain asset decoding and resampling, limiter bounds, style-switching crossfades, and long extreme-setting runs. Coverage is gated in CI.
 
 ## Rain asset
 
