@@ -579,12 +579,11 @@ impl AudioEngine {
             eq: GraphicEq::new(sample_rate, settings),
             volume,
             style_gains: SoundStyle::ALL.map(|style| {
-                let level = if style == settings.sound_style {
-                    1.0
-                } else {
-                    0.0
-                };
-                LinearRamp::new(level, sample_rate, STYLE_CROSSFADE_SECONDS)
+                LinearRamp::new(
+                    settings.mix().level(style),
+                    sample_rate,
+                    STYLE_CROSSFADE_SECONDS,
+                )
             }),
         })
     }
@@ -594,11 +593,7 @@ impl AudioEngine {
         self.eq.update(settings);
         self.volume.set_target(settings.volume);
         for (style, ramp) in SoundStyle::ALL.iter().zip(self.style_gains.iter_mut()) {
-            ramp.set_target(if *style == settings.sound_style {
-                1.0
-            } else {
-                0.0
-            });
+            ramp.set_target(settings.mix().level(*style));
         }
     }
 
@@ -728,6 +723,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::SourceMix;
     use rand::SeedableRng;
 
     #[test]
@@ -858,6 +854,7 @@ mod tests {
                 frequency_bands: [1.0; FREQUENCY_BANDS.len()],
                 listening_contour: true,
                 sound_style: style,
+                ..AudioSettings::default()
             };
             let mut engine = AudioEngine::new(48_000.0, settings).unwrap();
 
@@ -955,6 +952,85 @@ mod tests {
                     "{name} RMS was {rms:.4} at {sample_rate} Hz"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn mixed_sources_add_in_power() {
+        // White and brown are independent, so a 50/50 power mix must measure
+        // close to sqrt(0.5*rms_white^2 + 0.5*rms_brown^2), about 0.16 given
+        // both sources are level-matched. A linear-amplitude mixer would read
+        // about 3 dB low here.
+        let mut settings = AudioSettings {
+            volume: 1.0,
+            ..AudioSettings::default()
+        };
+        settings.set_mix(SourceMix {
+            white: 0.5,
+            pink: 0.0,
+            brown: 0.5,
+            rain: 0.0,
+        });
+        let mut engine = AudioEngine::new(48_000.0, settings).unwrap();
+        engine.rng = SmallRng::seed_from_u64(11);
+
+        // Let the volume ramp and the brown integrator settle.
+        for _ in 0..48_000 {
+            engine.next_sample();
+        }
+        let count = 400_000;
+        let sum_of_squares = (0..count)
+            .map(|_| f64::from(engine.next_sample()).powi(2))
+            .sum::<f64>();
+        let rms = (sum_of_squares / f64::from(count)).sqrt();
+        assert!((0.145..0.175).contains(&rms), "mixed RMS was {rms}");
+    }
+
+    #[test]
+    fn full_mix_of_every_source_stays_bounded() {
+        let mut settings = AudioSettings {
+            volume: 1.0,
+            frequency_bands: [1.0; FREQUENCY_BANDS.len()],
+            listening_contour: true,
+            ..AudioSettings::default()
+        };
+        settings.set_mix(SourceMix {
+            white: 1.0,
+            pink: 1.0,
+            brown: 1.0,
+            rain: 1.0,
+        });
+        let mut engine = AudioEngine::new(48_000.0, settings).unwrap();
+
+        for _ in 0..100_000 {
+            let sample = engine.next_sample();
+            assert!(sample.is_finite());
+            assert!(sample.abs() <= 1.0);
+        }
+    }
+
+    #[test]
+    fn solo_to_mix_transition_stays_bounded() {
+        let mut settings = AudioSettings {
+            volume: 1.0,
+            ..AudioSettings::default()
+        };
+        let mut engine = AudioEngine::new(48_000.0, settings).unwrap();
+        for _ in 0..10_000 {
+            engine.next_sample();
+        }
+
+        settings.set_mix(SourceMix {
+            white: 0.0,
+            pink: 0.3,
+            brown: 0.3,
+            rain: 0.4,
+        });
+        engine.update_settings(settings);
+        for _ in 0..50_000 {
+            let sample = engine.next_sample();
+            assert!(sample.is_finite());
+            assert!(sample.abs() <= 1.0);
         }
     }
 

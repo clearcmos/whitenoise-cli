@@ -8,6 +8,7 @@ The current release is `0.3.0`. It requires Rust 1.85 or newer.
 
 - Neutral, wideband white noise from a fast per-stream PRNG
 - Pink and brown noise from filters designed at startup for the actual device sample rate; pink stays within about 0.25 dB of the ideal -3 dB/octave slope from 20 Hz to 20 kHz
+- Source mixing: play several sources at once with per-source levels (`--mix rain=60,brown=40`)
 - A real 15-second mono rain recording with resampling and a two-second equal-power loop crossfade
 - Automatic rain level normalization and peak conditioning so the ambience is audible without clipping isolated drops
 - Eight serial peaking-EQ filters from 20 Hz to 20 kHz; the center position is a true 0 dB bypass
@@ -81,7 +82,10 @@ Interactive mode starts muted for headphone safety unless an initial volume is s
 ```bash
 whitenoise
 whitenoise --volume 20 --style rain
+whitenoise --volume 20 --mix rain=60,brown=40
 ```
+
+`--mix` takes comma-separated `SOURCE=PERCENT` pairs; sources not listed stay silent. Levels are power fractions, so `rain=50,brown=50` carries equal power from each source, and levels are deliberately not normalized: raising one source never lowers another. `--style` remains as shorthand for a single source and cannot be combined with `--mix`.
 
 Controls:
 
@@ -99,6 +103,7 @@ Non-interactive mode uses saved settings and accepts explicit overrides:
 ```bash
 whitenoise --non-interactive --volume 20 --style white
 whitenoise --non-interactive --volume 15 --style brown
+whitenoise --non-interactive --volume 15 --mix rain=50,pink=25
 whitenoise --non-interactive --volume 15 --style rain
 ```
 
@@ -128,6 +133,7 @@ Options:
       --non-interactive
   -v, --volume <PERCENT>
   -s, --style <STYLE>       [possible values: white, pink, brown, rain]
+  -m, --mix <MIX>           SOURCE=PERCENT pairs, for example rain=60,brown=40
   -h, --help
   -V, --version
 ```
@@ -165,7 +171,7 @@ White noise begins as a single uniform random signal with constant expected spec
 
 Pink noise shapes that signal with a ladder of matched-Z pole/zero pairs spaced two octaves apart, plus one correction zero solved numerically at startup for the actual sample rate, keeping the response within about 0.25 dB of the ideal -3 dB/octave slope from 20 Hz to 20 kHz at common rates. Brown noise uses a leaky integrator with its leak at 8 Hz, below the audible band, and an exact closed-form output gain. Both are level-matched to the white source by RMS rather than by any claimed perceptual weighting.
 
-Sources are combined with an equal-power crossfade and pass through a serial graphic EQ whose gains are smoothed in the dB domain. At neutral settings every biquad is exactly the identity transform, avoiding the gaps, overlaps, and phase-heavy recombination of the previous parallel band-pass implementation.
+Sources are combined at sqrt(level) amplitude, which makes mix levels power fractions and style changes equal-power crossfades, and pass through a serial graphic EQ whose gains are smoothed in the dB domain. At neutral settings every biquad is exactly the identity transform, avoiding the gaps, overlaps, and phase-heavy recombination of the previous parallel band-pass implementation.
 
 The rain WAV is decoded once at startup, downmixed if necessary, linearly resampled to the device rate, and looped with an equal-power crossfade. Its original recording has a high crest factor, so a measured normalization gain and static peak compression bring up the rain bed while retaining drop transients.
 
@@ -183,7 +189,7 @@ cargo build --release
 
 The coverage command matches the CI gate and needs `cargo-llvm-cov` installed (`cargo install cargo-llvm-cov`).
 
-Unit tests cover settings migration, sanitization, and file persistence, neutral-EQ transparency, EQ stability while sliders move, pink and brown spectral slopes and levels, device name matching, interactive key handling, output frame/channel handling, rain asset decoding and resampling, limiter bounds, style-switching crossfades, and long extreme-setting runs. Coverage is gated in CI.
+Unit tests cover settings migration, sanitization, and file persistence, source-mix parsing and power-additive mixing, neutral-EQ transparency, EQ stability while sliders move, pink and brown spectral slopes and levels, device name matching, interactive key handling, output frame/channel handling, rain asset decoding and resampling, limiter bounds, style-switching crossfades, and long extreme-setting runs. Coverage is gated in CI.
 
 ## Rain asset
 

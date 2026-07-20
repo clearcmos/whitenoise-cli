@@ -35,6 +35,7 @@ cargo run -- --list-hosts
 cargo run -- --list-devices
 cargo run -- --volume 10
 cargo run -- --non-interactive --volume 10 --style rain
+cargo run -- --non-interactive --volume 10 --mix rain=60,brown=40
 ```
 
 ## Architecture
@@ -60,7 +61,8 @@ cargo run -- --non-interactive --volume 10 --style rain
 
 - Interactive mode starts muted unless `--volume` is supplied.
 - Non-interactive mode must fail clearly rather than run indefinitely at zero volume.
-- Legacy `sound_style = "Vanilla"` and `perceptual_normalization` settings remain readable.
+- Legacy `sound_style = "Vanilla"` and `perceptual_normalization` settings remain readable, and files without a `[mix]` table migrate `sound_style` to a solo mix.
+- Mix levels are power fractions: the engine mixes at sqrt(level) amplitude, levels are never normalized against each other, and a solo at level 1.0 is identical to the pre-mixing output. The dominant source is still written to `sound_style` so older binaries can read new files.
 - The listening contour is a heuristic preset, not a claimed equal-loudness calibration.
 - Pink and brown filters are designed at startup for the actual sample rate; spectral-slope tests pin them to -3 and -6 dB/octave.
 - The rain source advances once per output frame regardless of channel count.
@@ -78,3 +80,4 @@ Do not assume NixOS, KDE, Wayland, a particular PipeWire version, or a specific 
 - 2026-07-20: Coverage is gated in CI at 60% lines via cargo-llvm-cov (measured 61.4% when the gate was added; device.rs and ui.rs had no tests yet). Ratchet to 70 once those modules gain tests; never lower the gate.
 - 2026-07-20: Gate ratcheted to 70 (measured 72.8% after device name matching, UI key handling, and settings persistence gained tests). Documented coverage exemptions, all environment-bound rather than logic: main.rs lifecycle glue (stream startup, signal handling), ui.rs rendering and raw-terminal paths, and device.rs functions that talk to a live CPAL host (the name-matching contract itself is extracted and tested as match_device_name).
 - 2026-07-20: Cargo dependency updates are deliberate and manual. Dependabot watches GitHub Actions only; CI enforces `--locked` everywhere so drift cannot slip in through a stale lockfile.
+- 2026-07-20: Source mixing treats levels as power fractions (amplitude sqrt(level)) rather than linear amplitudes, because the existing crossfade already ramped power-domain gains, a 50/50 mix should carry equal power, and a solo at 1.0 stays identical to the old single-source path. Levels are not normalized: adjusting one source must not change another, and headroom is guaranteed by the sources being RMS-matched (~0.16) so even all four at 100 percent sit under the limiter knee. Coverage gate raised 70 -> 75 after the mixing tests (measured 77.6).

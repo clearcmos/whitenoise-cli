@@ -110,6 +110,104 @@ impl SoundStyle {
     }
 }
 
+/// Per-source playback levels as power fractions in [0, 1]. Levels are
+/// independent (they need not sum to 1); the engine takes sqrt(level) as the
+/// mixing amplitude, so a 0.5/0.5 mix carries equal power from each source
+/// and a solo at 1.0 is bit-identical to the pre-mixing behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SourceMix {
+    pub white: f32,
+    pub pink: f32,
+    pub brown: f32,
+    pub rain: f32,
+}
+
+impl Default for SourceMix {
+    fn default() -> Self {
+        Self::solo(SoundStyle::White)
+    }
+}
+
+impl SourceMix {
+    pub fn solo(style: SoundStyle) -> Self {
+        let mut mix = Self {
+            white: 0.0,
+            pink: 0.0,
+            brown: 0.0,
+            rain: 0.0,
+        };
+        mix.set_level(style, 1.0);
+        mix
+    }
+
+    pub fn level(&self, style: SoundStyle) -> f32 {
+        match style {
+            SoundStyle::White => self.white,
+            SoundStyle::Pink => self.pink,
+            SoundStyle::Brown => self.brown,
+            SoundStyle::Rain => self.rain,
+        }
+    }
+
+    pub fn set_level(&mut self, style: SoundStyle, value: f32) {
+        let slot = match style {
+            SoundStyle::White => &mut self.white,
+            SoundStyle::Pink => &mut self.pink,
+            SoundStyle::Brown => &mut self.brown,
+            SoundStyle::Rain => &mut self.rain,
+        };
+        *slot = value;
+    }
+
+    pub fn total(&self) -> f32 {
+        SoundStyle::ALL.iter().map(|style| self.level(*style)).sum()
+    }
+
+    /// The single active source, if exactly one level is above zero.
+    pub fn solo_style(&self) -> Option<SoundStyle> {
+        let mut active = SoundStyle::ALL
+            .into_iter()
+            .filter(|style| self.level(*style) > 0.0);
+        match (active.next(), active.next()) {
+            (Some(style), None) => Some(style),
+            _ => None,
+        }
+    }
+
+    /// The loudest source; ties resolve in SoundStyle::ALL order, and an
+    /// all-zero mix reports White so style cycling always has an anchor.
+    pub fn dominant(&self) -> SoundStyle {
+        SoundStyle::ALL
+            .into_iter()
+            .rev()
+            .max_by(|a, b| self.level(*a).total_cmp(&self.level(*b)))
+            .unwrap_or(SoundStyle::White)
+    }
+
+    pub fn describe(&self) -> String {
+        if let Some(style) = self.solo_style() {
+            return style.label().to_owned();
+        }
+        if self.total() <= 0.0 {
+            return "Silence (all sources at zero)".to_owned();
+        }
+        let parts: Vec<String> = SoundStyle::ALL
+            .into_iter()
+            .filter(|style| self.level(*style) > 0.0)
+            .map(|style| format!("{} {:.0}%", style.label(), self.level(style) * 100.0))
+            .collect();
+        format!("Mix: {}", parts.join(" + "))
+    }
+
+    fn sanitize(mut self) -> Self {
+        for style in SoundStyle::ALL {
+            self.set_level(style, sanitize_unit(self.level(style), 0.0));
+        }
+        self
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AudioSettings {
@@ -117,7 +215,13 @@ pub struct AudioSettings {
     pub frequency_bands: [f32; FREQUENCY_BANDS.len()],
     #[serde(alias = "perceptual_normalization")]
     pub listening_contour: bool,
+    // Kept in the file as the dominant source so pre-mix binaries can still
+    // read new settings; at runtime it only anchors legacy migration.
     pub sound_style: SoundStyle,
+    // Access through mix()/set_mix(); pub(crate) only so struct-update
+    // syntax keeps working in the other modules' tests.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) mix: Option<SourceMix>,
 }
 
 impl Default for AudioSettings {
@@ -129,6 +233,7 @@ impl Default for AudioSettings {
             frequency_bands: [0.5; FREQUENCY_BANDS.len()],
             listening_contour: false,
             sound_style: SoundStyle::White,
+            mix: None,
         }
     }
 }
@@ -139,7 +244,20 @@ impl AudioSettings {
         for value in &mut self.frequency_bands {
             *value = sanitize_unit(*value, 0.5);
         }
+        self.mix = Some(self.mix().sanitize());
         self
+    }
+
+    /// The effective mix. A settings file predating the [mix] table migrates
+    /// to a solo of its legacy sound_style.
+    pub fn mix(&self) -> SourceMix {
+        self.mix
+            .unwrap_or_else(|| SourceMix::solo(self.sound_style))
+    }
+
+    pub fn set_mix(&mut self, mix: SourceMix) {
+        self.mix = Some(mix.sanitize());
+        self.sound_style = self.mix().dominant();
     }
 }
 
@@ -245,16 +363,26 @@ mod tests {
     #[test]
     fn settings_survive_a_save_and_load_round_trip() {
         let path = scratch_settings_path("round-trip");
-        let saved = AudioSettings {
+        let mut saved = AudioSettings {
             volume: 0.35,
             frequency_bands: [0.0, 0.1, 0.2, 0.3, 0.6, 0.7, 0.8, 1.0],
             listening_contour: true,
-            sound_style: SoundStyle::Brown,
+            ..AudioSettings::default()
         };
+        saved.set_mix(SourceMix {
+            white: 0.0,
+            pink: 0.25,
+            brown: 0.5,
+            rain: 0.0,
+        });
 
         save_settings_to(&path, &saved).unwrap();
         let loaded = load_settings_from(&path).unwrap();
-        assert_eq!(loaded, saved);
+        assert_eq!(loaded, saved.sanitize());
+        assert_eq!(loaded.mix().brown, 0.5);
+        // The dominant source is persisted as sound_style so binaries that
+        // predate the [mix] table still play something sensible.
+        assert_eq!(loaded.sound_style, SoundStyle::Brown);
 
         std::fs::remove_dir_all(path.ancestors().nth(2).unwrap()).unwrap();
     }
@@ -295,6 +423,73 @@ mod tests {
         assert_eq!(loaded.volume, 1.0);
 
         std::fs::remove_dir_all(path.ancestors().nth(2).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn legacy_files_without_a_mix_table_migrate_to_a_solo() {
+        // Files written before source mixing existed carry only sound_style.
+        let settings: AudioSettings = toml::from_str("sound_style = \"pink\"").unwrap();
+        assert_eq!(settings.mix(), SourceMix::solo(SoundStyle::Pink));
+        assert_eq!(settings.mix().solo_style(), Some(SoundStyle::Pink));
+    }
+
+    #[test]
+    fn mix_solo_and_dominant_semantics() {
+        let mix = SourceMix {
+            white: 0.0,
+            pink: 0.2,
+            brown: 0.6,
+            rain: 0.2,
+        };
+        assert_eq!(mix.solo_style(), None);
+        assert_eq!(mix.dominant(), SoundStyle::Brown);
+        assert!((mix.total() - 1.0).abs() < 1e-6);
+
+        // Ties resolve in SoundStyle::ALL order.
+        let tie = SourceMix {
+            white: 0.5,
+            pink: 0.0,
+            brown: 0.5,
+            rain: 0.0,
+        };
+        assert_eq!(tie.dominant(), SoundStyle::White);
+
+        let silent = SourceMix {
+            white: 0.0,
+            pink: 0.0,
+            brown: 0.0,
+            rain: 0.0,
+        };
+        assert_eq!(silent.dominant(), SoundStyle::White);
+        assert_eq!(silent.solo_style(), None);
+    }
+
+    #[test]
+    fn mix_describe_names_solos_and_lists_blends() {
+        assert_eq!(SourceMix::solo(SoundStyle::Rain).describe(), "Rain");
+        let blend = SourceMix {
+            white: 0.0,
+            pink: 0.0,
+            brown: 0.4,
+            rain: 0.6,
+        };
+        assert_eq!(blend.describe(), "Mix: Brown Noise 40% + Rain 60%");
+    }
+
+    #[test]
+    fn non_finite_mix_levels_are_sanitized() {
+        let mut settings = AudioSettings::default();
+        settings.set_mix(SourceMix {
+            white: f32::NAN,
+            pink: 2.0,
+            brown: -1.0,
+            rain: 0.5,
+        });
+        let mix = settings.mix();
+        assert_eq!(mix.white, 0.0);
+        assert_eq!(mix.pink, 1.0);
+        assert_eq!(mix.brown, 0.0);
+        assert_eq!(mix.rain, 0.5);
     }
 
     #[test]

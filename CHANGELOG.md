@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Source mixing: `--mix rain=60,brown=40` plays several sources at once. Levels are power fractions (the engine mixes at sqrt(level) amplitude), they are not normalized against each other, and all sources at 100 percent still sit inside the limiter's headroom. `--style` remains as shorthand for a solo and conflicts with `--mix`. Settings persist a `[mix]` table; files written before mixing migrate their `sound_style` to a solo, and the dominant source is still written as `sound_style` so older binaries keep working. In the interactive UI, S solos the source after the loudest one.
+
+### Verification
+
+- Tests for mix parsing, legacy migration, power-additive mixing (a 50/50 white and brown mix measures the correct combined RMS), the all-sources-at-full worst case, and mid-play solo-to-mix transitions. Coverage gate raised to 75 percent lines.
+
 ## 0.3.0 - 2026-07-20
 
 ### Added

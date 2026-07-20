@@ -12,7 +12,7 @@ use crossterm::{
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
-use crate::settings::{AudioSettings, FREQUENCY_BANDS, slider_to_db};
+use crate::settings::{AudioSettings, FREQUENCY_BANDS, SourceMix, slider_to_db};
 
 const SLIDER_WIDTH: usize = 30;
 
@@ -69,7 +69,7 @@ impl InteractiveUi {
             ResetColor,
             Print(format!(
                 "Source: {} (S to switch)\r\n",
-                settings.sound_style.label()
+                settings.mix().describe()
             )),
             Print(format!(
                 "Listening contour: {} (N to toggle)\r\n",
@@ -145,7 +145,9 @@ impl InteractiveUi {
             }
             KeyCode::Char('s' | 'S') => {
                 let mut settings = self.lock_settings();
-                settings.sound_style = settings.sound_style.next();
+                // From a custom mix, S solos the source after the loudest one.
+                let next = settings.mix().dominant().next();
+                settings.set_mix(SourceMix::solo(next));
             }
             KeyCode::Char('r' | 'R') => {
                 self.lock_settings().frequency_bands = [0.5; FREQUENCY_BANDS.len()];
@@ -310,6 +312,25 @@ mod tests {
         assert_eq!(settings(&ui).sound_style, SoundStyle::Pink);
         ui.handle_key(key(KeyCode::Char('S')));
         assert_eq!(settings(&ui).sound_style, SoundStyle::Brown);
+    }
+
+    #[test]
+    fn s_from_a_custom_mix_solos_the_source_after_the_dominant_one() {
+        let mut ui = ui();
+        {
+            let mut locked = ui.settings.lock().unwrap();
+            locked.set_mix(SourceMix {
+                white: 0.1,
+                pink: 0.0,
+                brown: 0.7,
+                rain: 0.2,
+            });
+        }
+        ui.handle_key(key(KeyCode::Char('s')));
+
+        let current = settings(&ui);
+        assert_eq!(current.mix(), SourceMix::solo(SoundStyle::Rain));
+        assert_eq!(current.sound_style, SoundStyle::Rain);
     }
 
     #[test]
